@@ -1,50 +1,103 @@
 import {
-  OutputSchema as RepoEvent,
-  isCommit,
+	OutputSchema as RepoEvent,
+	isCommit,
 } from './lexicon/types/com/atproto/sync/subscribeRepos'
-import { FirehoseSubscriptionBase, getOpsByType } from './util/subscription'
+import { Record as PostRecord } from './lexicon/types/app/bsky/feed/post'
+import { Record as LikeRecord } from './lexicon/types/app/bsky/feed/like'
+import { Record as RepostRecord } from './lexicon/types/app/bsky/feed/repost'
+import {
+	CreateOp,
+	DeleteOp,
+	FirehoseSubscriptionBase,
+	getOpsByType,
+} from './util/subscription'
+import { Database } from './db'
+
+async function createLike(db: Database, op: CreateOp<LikeRecord>) {
+	await db
+		.updateTable('post')
+		.where('postUri', '=', op.record.subject.uri)
+		.set(({ eb }) => ({ votes: eb.bxp('votes', '+', 1) }))
+		.execute()
+}
+
+async function deleteLike(db: Database, op: DeleteOp) {
+	await db
+		.updateTable('post')
+		.where('postUri', '=', op.uri)
+		.set(({ eb }) => ({ votes: eb.bxp('votes', '-', 1) }))
+		.execute()
+}
+
+async function createPost(db: Database, op: CreateOp<PostRecord>) {
+	const findRecorder = await db
+		.selectFrom('user')
+		.select('uri')
+		.where('uri', '=', op.author)
+		.execute()
+
+	if (findRecorder.length > 0) {
+		await db
+			.insertInto('post')
+			.values({
+				recordUri: op.uri,
+				recorder: op.author,
+
+				postUri: op.uri,
+				poster: op.author,
+
+				isoTime: new Date().toISOString(),
+				votes: 0,
+			})
+			.execute()
+	}
+}
+
+async function deletePost(db: Database, op: DeleteOp) {
+	await db.deleteFrom('post').where('postUri', '=', op.uri).execute()
+}
+
+async function createRepost(db: Database, op: CreateOp<RepostRecord>) {
+	const findRecorder = await db
+		.selectFrom('user')
+		.select('uri')
+		.where('uri', '=', op.author)
+		.execute()
+
+	if (findRecorder.length > 0) {
+		await db
+			.insertInto('post')
+			.values({
+				recordUri: op.uri,
+				recorder: op.author,
+
+				postUri: op.record.subject.uri,
+				poster: op.record.subject.uri.replace('at://', '').split('/')[0],
+
+				isoTime: new Date().toISOString(),
+				votes: 0,
+			})
+			.execute()
+	}
+}
+
+async function deleteRepost(db: Database, op: DeleteOp) {
+	await db.deleteFrom('post').where('recordUri', '=', op.uri).execute()
+}
 
 export class FirehoseSubscription extends FirehoseSubscriptionBase {
-  async handleEvent(evt: RepoEvent) {
-    if (!isCommit(evt)) return
-    const ops = await getOpsByType(evt)
+	async handleEvent(evt: RepoEvent) {
+		if (!isCommit(evt)) return
 
-    // This logs the text of every post off the firehose.
-    // Just for fun :)
-    // Delete before actually using
-    for (const post of ops.posts.creates) {
-      console.log(post.record.text)
-    }
+		const ops = await getOpsByType(evt)
 
-    const postsToDelete = ops.posts.deletes.map((del) => del.uri)
-    const postsToCreate = ops.posts.creates
-      .filter((create) => {
-        // only alf-related posts
-        return create.record.text.toLowerCase().includes('alf')
-      })
-      .map((create) => {
-        // map alf-related posts to a db row
-        return {
-          uri: create.uri,
-          cid: create.cid,
-          replyParent: create.record?.reply?.parent.uri ?? null,
-          replyRoot: create.record?.reply?.root.uri ?? null,
-          indexedAt: new Date().toISOString(),
-        }
-      })
+		ops.likes.creates.forEach(createLike.bind(null, this.db))
+		ops.likes.deletes.forEach(deleteLike.bind(null, this.db))
 
-    if (postsToDelete.length > 0) {
-      await this.db
-        .deleteFrom('post')
-        .where('uri', 'in', postsToDelete)
-        .execute()
-    }
-    if (postsToCreate.length > 0) {
-      await this.db
-        .insertInto('post')
-        .values(postsToCreate)
-        .onConflict((oc) => oc.doNothing())
-        .execute()
-    }
-  }
+		ops.posts.creates.forEach(createPost.bind(null, this.db))
+		ops.posts.deletes.forEach(deletePost.bind(null, this.db))
+
+		ops.reposts.creates.forEach(createRepost.bind(null, this.db))
+		ops.reposts.deletes.forEach(deleteRepost.bind(null, this.db))
+	}
 }

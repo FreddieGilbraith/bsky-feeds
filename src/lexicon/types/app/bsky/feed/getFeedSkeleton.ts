@@ -12,6 +12,8 @@ import * as AppBskyFeedDefs from './defs'
 export interface QueryParams {
   feed: string
   limit: number
+  requesterDid: string
+  authorization?: string
   cursor?: string
 }
 
