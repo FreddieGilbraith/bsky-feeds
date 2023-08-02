@@ -1,9 +1,9 @@
+import 'isomorphic-fetch'
 import xrpc from '@atproto/xrpc'
 
 import { differenceInMilliseconds } from 'date-fns'
 import { QueryParams } from '../lexicon/types/app/bsky/feed/getFeedSkeleton'
 import { AppContext } from '../config'
-import { BskyNS } from '../lexicon'
 import { schemas } from '../lexicon/lexicons'
 import { Database } from '../db'
 
