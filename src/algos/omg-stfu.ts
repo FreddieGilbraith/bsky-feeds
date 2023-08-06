@@ -92,9 +92,16 @@ async function refreshLocalForUser(db: Database, params: QueryParams) {
 export const handler = async (ctx: AppContext, params: QueryParams) => {
 	const { db } = ctx
 
-	refreshLocalForUser(db, params)
+	refreshLocalForUser(db, params).catch(
+		console.error.bind(null, 'refreshLocalForUser'),
+	)
 
 	const start = new Date()
+
+	const [{ totalUsers }] = await db
+		.selectFrom('user')
+		.select((eb) => [eb.fn.count<number>('uri').as('totalUsers')])
+		.execute()
 
 	const [{ usersCount, postsCount, postVotesAvg }] = await db
 		.selectFrom('post')
@@ -107,7 +114,13 @@ export const handler = async (ctx: AppContext, params: QueryParams) => {
 
 	const userPostsAvg = postsCount / usersCount
 
-	const network = { usersCount, postsCount, userPostsAvg, postVotesAvg }
+	const network = {
+		usersCount,
+		postsCount,
+		userPostsAvg,
+		postVotesAvg,
+		totalUsers,
+	}
 
 	const feedData = await db
 		.selectFrom('follow')
