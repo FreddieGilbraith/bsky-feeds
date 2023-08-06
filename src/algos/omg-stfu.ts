@@ -1,3 +1,4 @@
+import { AtpAgent } from '@atproto/api'
 import 'isomorphic-fetch'
 import xrpc from '@atproto/xrpc'
 
@@ -13,8 +14,9 @@ export const shortname = 'omg-stfu'
 xrpc.addLexicons(schemas)
 
 async function getFollows(
+	agent: AtpAgent,
 	params: QueryParams,
-	queryCursor = null,
+	queryCursor: string | null = null,
 ): Promise<Array<string>> {
 	const { requesterDid: actor, authorization } = params
 
@@ -22,44 +24,32 @@ async function getFollows(
 		return []
 	}
 
-	console.log('getFollows', {
-		headers: {
-			Authorization: authorization,
-		},
-	})
+	const request = {
+		repo: params.requesterDid,
+		collection: 'app.bsky.graph.follow',
+		limit: 30,
+		...(queryCursor ? { cursor: queryCursor } : {}),
+	}
 
 	const {
-		data: { follows: followsRaw, cursor },
-	} = await xrpc.call(
-		'https://bsky.social/xrpc/',
-		'app.bsky.graph.getFollows',
-		{
-			actor,
-			limit: 30,
-			...(queryCursor ? { cursor: queryCursor } : {}),
-		},
-		null,
-		{
-			headers: {
-				Authorization: authorization,
-			},
-		},
-	)
+		data: { records, cursor = null },
+	} = await agent.com.atproto.repo.listRecords(request)
 
-	const follows = followsRaw.map((x) => x.did)
+	const follows = records.map((record: any) => record.value.subject)
 
 	if (follows.length === 30) {
-		return [...follows, ...(await getFollows(params, cursor))]
+		return [...follows, ...(await getFollows(agent, params, cursor))]
 	} else {
 		return follows
 	}
 }
 
-async function refreshLocalForUser(db: Database, params: QueryParams) {
+async function refreshLocalForUser(ctx: AppContext, params: QueryParams) {
+	const { db, agent } = ctx
 	const follower = params.requesterDid
 	try {
 		const [follows] = await Promise.all([
-			getFollows(params),
+			getFollows(agent, params),
 			db
 				.selectFrom('follow')
 				.select('followed')
@@ -97,8 +87,7 @@ async function refreshLocalForUser(db: Database, params: QueryParams) {
 
 export const handler = async (ctx: AppContext, params: QueryParams) => {
 	const { db } = ctx
-
-	refreshLocalForUser(db, params).catch(
+	refreshLocalForUser(ctx, params).catch(
 		console.error.bind(null, 'refreshLocalForUser'),
 	)
 
