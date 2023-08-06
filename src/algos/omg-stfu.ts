@@ -22,6 +22,12 @@ async function getFollows(
 		return []
 	}
 
+	console.log('getFollows', {
+		headers: {
+			Authorization: authorization,
+		},
+	})
+
 	const {
 		data: { follows: followsRaw, cursor },
 	} = await xrpc.call(
@@ -35,7 +41,7 @@ async function getFollows(
 		null,
 		{
 			headers: {
-				authorization,
+				Authorization: authorization,
 			},
 		},
 	)
