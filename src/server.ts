@@ -75,6 +75,7 @@ export class FeedGenerator {
 			identifier: this.cfg.handle,
 			password: this.cfg.appPassword,
 		})
+
 		console.log('logged in')
 
 		this.firehose.run(this.cfg.subscriptionReconnectDelay)
