@@ -40,11 +40,11 @@ async function createPost(db: Database, op: CreateOp<PostRecord>) {
 		await db
 			.insertInto('post')
 			.values({
-				recordUri: op.uri,
-				recorder: op.author,
+				uri: op.uri,
+				contributor: op.author,
 
 				postUri: op.uri,
-				poster: op.author,
+				author: op.author,
 
 				isoTime: new Date().toISOString(),
 				votes: 0,
@@ -68,11 +68,11 @@ async function createRepost(db: Database, op: CreateOp<RepostRecord>) {
 		await db
 			.insertInto('post')
 			.values({
-				recordUri: op.uri,
-				recorder: op.author,
+				uri: op.uri,
+				contributor: op.author,
 
 				postUri: op.record.subject.uri,
-				poster: op.record.subject.uri.replace('at://', '').split('/')[0],
+				author: op.record.subject.uri.replace('at://', '').split('/')[0],
 
 				isoTime: new Date().toISOString(),
 				votes: 0,
@@ -82,7 +82,7 @@ async function createRepost(db: Database, op: CreateOp<RepostRecord>) {
 }
 
 async function deleteRepost(db: Database, op: DeleteOp) {
-	await db.deleteFrom('post').where('recordUri', '=', op.uri).execute()
+	await db.deleteFrom('post').where('uri', '=', op.uri).execute()
 }
 
 export class FirehoseSubscription extends FirehoseSubscriptionBase {

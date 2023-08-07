@@ -5,11 +5,11 @@ export type DatabaseSchema = {
 }
 
 export type Post = {
-	recordUri: string
-	recorder: string
+	uri: string
+	contributor: string
 
 	postUri: string
-	poster: string
+	author: string
 
 	isoTime: string
 	votes: number

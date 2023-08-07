@@ -87,16 +87,16 @@ export const handler = async (ctx: AppContext, params: QueryParams) => {
 
 	const start = new Date()
 
-	const [{ totalUsers }] = await db
+	const [{ totalTrackedUsers }] = await db
 		.selectFrom('user')
-		.select((eb) => [eb.fn.count<number>('uri').as('totalUsers')])
+		.select((eb) => [eb.fn.count<number>('uri').as('totalTrackedUsers')])
 		.execute()
 
 	const [{ usersCount, postsCount, postVotesAvg }] = await db
 		.selectFrom('post')
 		.select((eb) => [
 			eb.fn.count<number>('postUri').as('postsCount'),
-			eb.fn.count<number>('poster').distinct().as('usersCount'),
+			eb.fn.count<number>('author').distinct().as('usersCount'),
 			eb.fn.avg<number>('votes').as('postVotesAvg'),
 		])
 		.execute()
@@ -108,17 +108,19 @@ export const handler = async (ctx: AppContext, params: QueryParams) => {
 		postsCount,
 		userPostsAvg,
 		postVotesAvg,
-		totalUsers,
+		totalTrackedUsers,
 	}
 
+	//const feedData = [] as Array<any>
 	const feedData = await db
 		.selectFrom('follow')
 		.where('follower', '=', params.requesterDid)
-		.innerJoin('post', 'follow.followed', 'post.recorder')
-		.innerJoin('post as otherPosts', 'post.poster', 'otherPosts.poster')
+		.innerJoin('post', 'follow.followed', 'post.contributor')
+		.innerJoin('post as otherPosts', 'post.author', 'otherPosts.author')
 		.groupBy('post.postUri')
 		.select((eb) => [
-			'post.recordUri as post',
+			'post.uri as uri',
+			'post.postUri as post',
 			'post.isoTime',
 			'post.votes',
 			eb.fn.count<number>('otherPosts.postUri').as('postsByUser'),
@@ -126,19 +128,40 @@ export const handler = async (ctx: AppContext, params: QueryParams) => {
 		])
 		.where('post.isoTime', '<', params.cursor ?? start.toISOString())
 		.orderBy('post.isoTime', 'desc')
-		.limit(30)
+		.limit(params.limit)
 		.execute()
 
 	const cursor = (feedData ?? []).at(-1)?.isoTime ?? undefined
 
-	const feed = feedData.filter(({ isoTime, ...item }) => {
-		const userNormalizedPostRate = item.postsByUser / userPostsAvg
-		const postNormalizedVotes =
-			item.votes / (item.postersAverageVotes ?? 1) || 1
-		const isBanger = userNormalizedPostRate - 1 < postNormalizedVotes
+	console.log(feedData)
 
-		return isBanger
-	})
+	const feed = feedData
+		.map(({ isoTime, ...item }) => {
+			const userNormalizedPostRate = item.postsByUser / userPostsAvg
+			const postNormalizedVotes =
+				item.votes / (item.postersAverageVotes ?? 1) || 1
+			const isBanger = userNormalizedPostRate - 1 < postNormalizedVotes
+
+			return {
+				...item,
+				isoTime,
+				isBanger,
+				userNormalizedPostRate,
+				postNormalizedVotes,
+			}
+		})
+		.map((post) => ({
+			...post,
+			...(post.post !== post.uri
+				? {
+						reason: {
+							$type: 'app.bsky.feed.defs#skeletonReasonRepost',
+							repost: post.uri,
+						},
+				  }
+				: {}),
+		}))
+		.filter((post) => post.isBanger)
 
 	const end = new Date()
 

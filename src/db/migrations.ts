@@ -40,3 +40,39 @@ migrations['001'] = {
 		await db.schema.dropTable('follow').execute()
 	},
 }
+
+migrations['002'] = {
+	async up(db: Kysely<unknown>) {
+		await db.schema
+			.alterTable('post')
+			.renameColumn('recordUri', 'uri')
+			.execute()
+
+		await db.schema
+			.alterTable('post')
+			.renameColumn('recorder', 'contributor')
+			.execute()
+
+		await db.schema
+			.alterTable('post')
+			.renameColumn('poster', 'author')
+			.execute()
+	},
+
+	async down(db: Kysely<unknown>) {
+		await db.schema
+			.alterTable('post')
+			.renameColumn('uri', 'recordUri')
+			.execute()
+
+		await db.schema
+			.alterTable('post')
+			.renameColumn('author', 'poster')
+			.execute()
+
+		await db.schema
+			.alterTable('post')
+			.renameColumn('contributor', 'recorder')
+			.execute()
+	},
+}
