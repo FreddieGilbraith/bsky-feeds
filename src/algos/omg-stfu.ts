@@ -18,12 +18,6 @@ async function getFollows(
 	params: QueryParams,
 	queryCursor: string | null = null,
 ): Promise<Array<string>> {
-	const { requesterDid: actor, authorization } = params
-
-	if (!authorization) {
-		return []
-	}
-
 	const request = {
 		repo: params.requesterDid,
 		collection: 'app.bsky.graph.follow',

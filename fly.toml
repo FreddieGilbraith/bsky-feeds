@@ -12,7 +12,7 @@ primary_region = "lhr"
 	FEEDGEN_PORT="3000"
 	FEEDGEN_LISTENHOST="0.0.0.0"
 	FEEDGEN_PUBLISHER_DID="did:plc:wlgerp2not5oct7twfq2teyg"
-	FEEDGEN_SQLITE_LOCATION="./db.sqlite"
+	FEEDGEN_SQLITE_LOCATION="/data/db.sqlite"
 	FEEDGEN_HOSTNAME="bsky-feed.littlebonsai.co.uk"
 
 [[mounts]]
