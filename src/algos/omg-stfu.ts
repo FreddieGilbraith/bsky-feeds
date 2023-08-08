@@ -87,31 +87,16 @@ export const handler = async (ctx: AppContext, params: QueryParams) => {
 
 	const start = new Date()
 
-	const [{ totalTrackedUsers }] = await db
-		.selectFrom('user')
-		.select((eb) => [eb.fn.count<number>('uri').as('totalTrackedUsers')])
-		.execute()
-
-	const [{ usersCount, postsCount, postVotesAvg }] = await db
+	const [{ usersCount, postsCount }] = await db
 		.selectFrom('post')
 		.select((eb) => [
 			eb.fn.count<number>('postUri').as('postsCount'),
 			eb.fn.count<number>('author').distinct().as('usersCount'),
-			eb.fn.avg<number>('votes').as('postVotesAvg'),
 		])
 		.execute()
 
 	const userPostsAvg = postsCount / usersCount
 
-	const network = {
-		usersCount,
-		postsCount,
-		userPostsAvg,
-		postVotesAvg,
-		totalTrackedUsers,
-	}
-
-	//const feedData = [] as Array<any>
 	const feedData = await db
 		.selectFrom('follow')
 		.where('follower', '=', params.requesterDid)
@@ -132,8 +117,6 @@ export const handler = async (ctx: AppContext, params: QueryParams) => {
 		.execute()
 
 	const cursor = (feedData ?? []).at(-1)?.isoTime ?? undefined
-
-	console.log(feedData)
 
 	const feed = feedData
 		.map(({ isoTime, ...item }) => {
@@ -163,12 +146,8 @@ export const handler = async (ctx: AppContext, params: QueryParams) => {
 		}))
 		.filter((post) => post.isBanger)
 
-	const end = new Date()
-
 	return {
 		cursor,
-		doneIn: differenceInMilliseconds(end, start) + 'ms',
-		network,
 		feed,
 	}
 }
