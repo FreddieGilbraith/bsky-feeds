@@ -6,7 +6,6 @@ import { differenceInMilliseconds } from 'date-fns'
 import { QueryParams } from '../lexicon/types/app/bsky/feed/getFeedSkeleton'
 import { AppContext } from '../config'
 import { schemas } from '../lexicon/lexicons'
-import { Database } from '../db'
 
 // max 15 chars
 export const shortname = 'omg-stfu'
@@ -79,6 +78,14 @@ async function refreshLocalForUser(ctx: AppContext, params: QueryParams) {
 	}
 }
 
+async function time<T>(label: string, fn: () => Promise<T>): Promise<T> {
+	const start = new Date()
+	const out = await fn()
+	const end = new Date()
+	console.log(label, differenceInMilliseconds(end, start), 'ms')
+	return out
+}
+
 export const handler = async (ctx: AppContext, params: QueryParams) => {
 	const { db } = ctx
 	refreshLocalForUser(ctx, params).catch(
@@ -97,28 +104,48 @@ export const handler = async (ctx: AppContext, params: QueryParams) => {
 
 	const userPostsAvg = postsCount / usersCount
 
-	const feedData = await db
-		.selectFrom('follow')
-		.where('follower', '=', params.requesterDid)
-		.innerJoin('post', 'follow.followed', 'post.contributor')
-		.innerJoin('post as otherPosts', 'post.author', 'otherPosts.author')
-		.groupBy('post.postUri')
-		.select((eb) => [
-			'post.uri as uri',
-			'post.postUri as post',
-			'post.isoTime',
-			'post.votes',
-			eb.fn.count<number>('otherPosts.postUri').as('postsByUser'),
-			eb.fn.avg<number>('otherPosts.votes').as('postersAverageVotes'),
-		])
-		.where('post.isoTime', '<', params.cursor ?? start.toISOString())
-		.orderBy('post.isoTime', 'desc')
-		.limit(params.limit)
-		.execute()
+	const [usersData, postsData] = await Promise.all([
+		db
+			.selectFrom('follow')
+			.where('follower', '=', params.requesterDid)
+			.innerJoin('post', 'follow.followed', 'post.contributor')
+			.groupBy('post.contributor')
+			.select((eb) => [
+				'followed as contributor',
+				eb.fn.count<number>('post.postUri').as('postsByUser'),
+				eb.fn.avg<number>('post.votes').as('postersAverageVotes'),
+			])
+			.execute(),
 
-	const cursor = (feedData ?? []).at(-1)?.isoTime ?? undefined
+		db
+			.selectFrom('follow')
+			.where('follower', '=', params.requesterDid)
+			.innerJoin('post', 'follow.followed', 'post.contributor')
+			.select([
+				'followed as contributor',
+				'post.uri as uri',
+				'post.postUri as post',
+				'post.isoTime',
+				'post.votes',
+			])
+			.where('post.isoTime', '<', params.cursor ?? start.toISOString())
+			.orderBy('post.isoTime', 'desc')
+			.limit(params.limit ?? 30)
+			.execute(),
+	])
 
-	const feed = feedData
+	const users = Object.fromEntries(
+		usersData.map((user) => [user.contributor, user]),
+	)
+
+	const posts = postsData.map((post) => ({
+		...post,
+		...users[post.contributor],
+	}))
+
+	const cursor = (posts ?? []).at(-1)?.isoTime ?? undefined
+
+	const feed = posts
 		.map(({ isoTime, ...item }) => {
 			const userNormalizedPostRate = item.postsByUser / userPostsAvg
 			const postNormalizedVotes =
@@ -145,6 +172,14 @@ export const handler = async (ctx: AppContext, params: QueryParams) => {
 				: {}),
 		}))
 		.filter((post) => post.isBanger)
+		.map(({ post, reason }) => ({
+			post,
+			reason,
+		}))
+
+	const end = new Date()
+
+	console.log('took', differenceInMilliseconds(end, start), 'ms')
 
 	return {
 		cursor,
