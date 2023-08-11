@@ -91,6 +91,8 @@ export class FirehoseSubscription extends FirehoseSubscriptionBase {
 
 		const ops = await getOpsByType(evt)
 
+		//process.stdout.write('.')
+
 		ops.likes.creates.forEach(createLike.bind(null, this.db))
 		ops.likes.deletes.forEach(deleteLike.bind(null, this.db))
 

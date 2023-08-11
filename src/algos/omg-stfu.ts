@@ -1,6 +1,7 @@
 import { AtpAgent } from '@atproto/api'
 import 'isomorphic-fetch'
 import xrpc from '@atproto/xrpc'
+import { sql } from 'kysely'
 
 import { differenceInMilliseconds } from 'date-fns'
 import { QueryParams } from '../lexicon/types/app/bsky/feed/getFeedSkeleton'
@@ -104,85 +105,163 @@ export const handler = async (ctx: AppContext, params: QueryParams) => {
 
 	const userPostsAvg = postsCount / usersCount
 
-	const [usersData, postsData] = await Promise.all([
-		db
-			.selectFrom('follow')
-			.where('follower', '=', params.requesterDid)
-			.innerJoin('post', 'follow.followed', 'post.contributor')
-			.groupBy('post.contributor')
-			.select((eb) => [
-				'followed as contributor',
-				eb.fn.count<number>('post.postUri').as('postsByUser'),
-				eb.fn.avg<number>('post.votes').as('postersAverageVotes'),
-			])
-			.execute(),
+	console.log({ userPostsAvg, postsCount, usersCount })
 
-		db
-			.selectFrom('follow')
-			.where('follower', '=', params.requesterDid)
-			.innerJoin('post', 'follow.followed', 'post.contributor')
-			.select([
-				'followed as contributor',
-				'post.uri as uri',
-				'post.postUri as post',
-				'post.isoTime',
-				'post.votes',
-			])
-			.where('post.isoTime', '<', params.cursor ?? start.toISOString())
-			.orderBy('post.isoTime', 'desc')
-			.limit(params.limit ?? 30)
-			.execute(),
-	])
+	const usersQuery = db
+		.selectFrom('follow')
+		.where('follower', '=', params.requesterDid)
+		.innerJoin('post', 'follow.followed', 'post.contributor')
+		.groupBy('post.contributor')
+		.select(({ eb }) => [
+			'followed as contributor',
+			eb.fn.count<number>('post.postUri').as('postsByUser'),
+			eb.fn.avg<number>(sql`ln(post.votes)`).as('votesAvg'),
+			eb(eb.fn.count<number>('post.postUri'), '/', userPostsAvg).as('postRate'),
+		])
+	//console.log(usersQuery.compile().sql)
+	const usersData = await usersQuery.execute()
 
 	const users = Object.fromEntries(
-		usersData.map((user) => [user.contributor, user]),
+		usersData
+			.map(({ votesAvg, postRate, ...user }) => ({
+				...user,
+				votesAvg: Math.pow(Math.E, votesAvg),
+				postRate: Math.log(postRate),
+			}))
+			.map((user) => [user.contributor, user]),
 	)
 
-	const posts = postsData.map((post) => ({
-		...post,
-		...users[post.contributor],
-	}))
+	const mostProloficPosters = Object.values(users)
+		.sort((a, b) => b.postRate - a.postRate)
+		.slice(0, Math.floor(Math.log(usersData.length)))
 
-	const cursor = (posts ?? []).at(-1)?.isoTime ?? undefined
+	const postsData = await db
+		.selectFrom('follow')
+		.where('follower', '=', params.requesterDid)
+		.innerJoin('post', 'follow.followed', 'post.contributor')
+		.select([
+			'followed as contributor',
+			'post.author as author',
+			'post.uri as uri',
+			'post.postUri as post',
+			'post.isoTime',
+			'post.votes',
+		])
+		.where('post.isoTime', '<', params.cursor ?? start.toISOString())
+		.orderBy('post.isoTime', 'desc')
+		.limit((params.limit ?? 30) * 4)
+		.execute()
 
-	const feed = posts
-		.map(({ isoTime, ...item }) => {
-			const userNormalizedPostRate = item.postsByUser / userPostsAvg
-			const postNormalizedVotes =
-				item.votes / (item.postersAverageVotes ?? 1) || 1
-			const isBanger = userNormalizedPostRate - 1 < postNormalizedVotes
+	//console.log('rare', users['did:plc:psyip2d7nquum47ova4isnvu']) // Rare
+	//console.log('JSON Schreirir', users['did:plc:2mkgbhbhqvappkkorf2bzyrp']) // JSON Shcrier
+	//console.log('Average', users['did:plc:xwz5k4wh527nlcxqeezrwxaa']) // avg
+	//console.log('Da King of Kings', users['did:plc:ssswl2yqnc4snqvsdu5u7jiq']) // Da King of Kings
+	//console.log('Kafui', users['did:plc:533rak3rtsbnvlxytybkdepr']) // Kafui
+	//console.log('kat', users['did:plc:pgf2yw2zddrxh5ngapc7rfq6']) // kat
 
-			return {
-				...item,
-				isoTime,
-				isBanger,
-				userNormalizedPostRate,
-				postNormalizedVotes,
-			}
-		})
+	const postLimit = mostProloficPosters.at(-1)?.postRate ?? 1
+
+	const posts = postsData
 		.map((post) => ({
 			...post,
-			...(post.post !== post.uri
-				? {
-						reason: {
-							$type: 'app.bsky.feed.defs#skeletonReasonRepost',
-							repost: post.uri,
-						},
-				  }
-				: {}),
+			...users[post.author],
 		}))
-		.filter((post) => post.isBanger)
-		.map(({ post, reason }) => ({
+		.map((post) => ({
+			...post,
+			normalizedVotes: post.votes / post.votesAvg,
+		}))
+		.map((post) => ({
+			...post,
+			isBanger: post.postRate - postLimit < post.normalizedVotes,
+		}))
+
+	//console.log(
+	//posts
+	//.slice(0, 5)
+	//.map(
+	//({
+	//post,
+	//isoTime,
+	//votes,
+	//postsByUser,
+	//votesAvg,
+	//postRate,
+	//normalizedVotes,
+	//isBanger,
+	//}) => ({
+	//isoTime,
+	//post,
+	//votes,
+	//votesAvg,
+	//normalizedVotes,
+	//postsByUser,
+	//postRate,
+	//isBanger,
+	//}),
+	//),
+	//)
+
+	//const powerPosts = posts.filter(({ contributor }) =>
+	//[
+	//'did:plc:vwzwgnygau7ed7b7wt5ux7y2',
+	//'did:plc:katl2n3xfpfwpv45aiwwtbrb',
+	//'did:plc:ssswl2yqnc4snqvsdu5u7jiq',
+	//'did:plc:533rak3rtsbnvlxytybkdepr',
+	//'did:plc:pgf2yw2zddrxh5ngapc7rfq6',
+	//].includes(contributor),
+	//).length
+
+	const feedWithMeta = posts.map((post) => ({
+		...post,
+		...(post.post !== post.uri
+			? {
+					reason: {
+						$type: 'app.bsky.feed.defs#skeletonReasonRepost',
+						repost: post.uri,
+					},
+			  }
+			: {}),
+	}))
+
+	const filteredFeed = feedWithMeta.filter((post) => post.isBanger)
+
+	//const powerPostsRemaining = filteredFeed.filter(({ contributor }) =>
+	//[
+	//'did:plc:vwzwgnygau7ed7b7wt5ux7y2',
+	//'did:plc:katl2n3xfpfwpv45aiwwtbrb',
+	//'did:plc:ssswl2yqnc4snqvsdu5u7jiq',
+	//'did:plc:533rak3rtsbnvlxytybkdepr',
+	//'did:plc:pgf2yw2zddrxh5ngapc7rfq6',
+	//].includes(contributor),
+	//).length
+
+	//console.log({
+	//feedWithMeta: feedWithMeta.length,
+	//powerPosts,
+	//filteredFeed: filteredFeed.length,
+	//powerPostsRemaining,
+	//})
+
+	const limitedFeed = filteredFeed.slice(0, 30)
+	const cursor = (limitedFeed ?? []).at(-1)?.isoTime ?? undefined
+
+	const feed = limitedFeed.map(
+		({ post, reason, isoTime, votes, postRate, normalizedVotes }) => ({
 			post,
 			reason,
-		}))
+			isoTime,
+			votes,
+			postRate,
+			normalizedVotes,
+		}),
+	)
 
 	const end = new Date()
 
 	console.log('took', differenceInMilliseconds(end, start), 'ms')
 
 	return {
-		cursor,
 		feed,
+		cursor,
 	}
 }

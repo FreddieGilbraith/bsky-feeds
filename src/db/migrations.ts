@@ -76,17 +76,3 @@ migrations['002'] = {
 			.execute()
 	},
 }
-
-//migrations['003'] = {
-//async up(db: Kysely<unknown>) {
-//await db.schema
-//.createIndex('idx_001')
-//.on('post')
-//.column('contributor')
-//.column('isoTime')
-//.execute()
-//},
-
-//async down(db: Kysely<unknown>) {
-//},
-//}

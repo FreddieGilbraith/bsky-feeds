@@ -37,6 +37,7 @@ export abstract class FirehoseSubscriptionBase {
 	abstract handleEvent(evt: RepoEvent): Promise<void>
 
 	async run(subscriptionReconnectDelay: number) {
+		console.log({ subscriptionReconnectDelay })
 		try {
 			for await (const evt of this.sub) {
 				try {

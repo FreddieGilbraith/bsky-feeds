@@ -21,7 +21,7 @@ const run = async () => {
 
 	// A display name for your feed
 	// Ex: What's Hot
-	const displayName = 'OMG STFU'
+	const displayName = 'OMG STFU (beta)'
 
 	// (Optional) A description of your feed
 	// Ex: Top trending content from the whole network
