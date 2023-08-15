@@ -25,9 +25,11 @@ async function getFollows(
 		...(queryCursor ? { cursor: queryCursor } : {}),
 	}
 
+	const response = await agent.com.atproto.repo.listRecords(request)
+
 	const {
 		data: { records, cursor = null },
-	} = await agent.com.atproto.repo.listRecords(request)
+	} = response
 
 	const follows = records.map((record: any) => record.value.subject)
 
@@ -42,7 +44,7 @@ async function refreshLocalForUser(ctx: AppContext, params: QueryParams) {
 	const { db, agent } = ctx
 	const follower = params.requesterDid
 	try {
-		const [follows] = await Promise.all([
+		const [actualFollows, storedFollows] = await Promise.all([
 			getFollows(agent, params),
 			db
 				.selectFrom('follow')
@@ -51,28 +53,42 @@ async function refreshLocalForUser(ctx: AppContext, params: QueryParams) {
 				.execute(),
 		])
 
-		if (follows.length > 0) {
+		const followsToRemove = new Set(storedFollows.map((x) => x.followed))
+		for (const actualFollow of actualFollows) {
+			followsToRemove.delete(actualFollow)
+		}
+
+		if (actualFollows.length > 0) {
 			const addFollowers = db
 				.insertInto('follow')
 				.onConflict((oc) => oc.doNothing())
 				.values(
-					follows.map((followed: string) => ({
+					actualFollows.map((followed: string) => ({
 						followed,
 						follower: params.requesterDid,
 					})),
 				)
 
+			const removeFollowers = db
+				.deleteFrom('follow')
+				.where('follower', '=', params.requesterDid)
+				.where('followed', 'in', [...followsToRemove.values()])
+
 			const addUsers = db
 				.insertInto('user')
 				.onConflict((oc) => oc.doNothing())
 				.values(
-					[follower, ...follows].map((uri: string, i) => ({
+					[follower, ...actualFollows].map((uri: string, i) => ({
 						uri,
 						interest: i === 0 ? 2 : 1,
 					})),
 				)
 
-			await Promise.all([addFollowers.execute(), addUsers.execute()])
+			await Promise.all([
+				addFollowers.execute(),
+				addUsers.execute(),
+				removeFollowers.execute(),
+			])
 		}
 	} catch (e) {
 		console.error('refreshLocalForUser', e)
@@ -105,7 +121,7 @@ export const handler = async (ctx: AppContext, params: QueryParams) => {
 
 	const userPostsAvg = postsCount / usersCount
 
-	console.log({ userPostsAvg, postsCount, usersCount })
+	//console.log({ userPostsAvg, postsCount, usersCount })
 
 	const usersQuery = db
 		.selectFrom('follow')
@@ -151,7 +167,7 @@ export const handler = async (ctx: AppContext, params: QueryParams) => {
 		.orderBy('post.isoTime', 'desc')
 		.limit((params.limit ?? 30) * 4)
 
-	console.log(postsQuery.compile().sql)
+	//console.log(postsQuery.compile().sql)
 	try {
 		const postsData = await postsQuery.execute()
 
@@ -201,7 +217,7 @@ export const handler = async (ctx: AppContext, params: QueryParams) => {
 
 		const end = new Date()
 
-		console.log('took', differenceInMilliseconds(end, start), 'ms')
+		//console.log('took', differenceInMilliseconds(end, start), 'ms')
 
 		return {
 			feed,
