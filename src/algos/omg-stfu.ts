@@ -133,8 +133,6 @@ export const handler = async (ctx: AppContext, params: QueryParams) => {
 
 		const userPostsAvg = postsCount / usersCount
 
-		//console.log({ userPostsAvg, postsCount, usersCount })
-
 		const usersQuery = db
 			.selectFrom('follow')
 			.where('follower', '=', params.requesterDid)
@@ -148,24 +146,6 @@ export const handler = async (ctx: AppContext, params: QueryParams) => {
 					'postRate',
 				),
 			])
-
-		//console.log(usersQuery.compile().sql)
-
-		const usersData = await usersQuery.execute()
-
-		const users = Object.fromEntries(
-			usersData
-				.map(({ votesAvg, postRate, ...user }) => ({
-					...user,
-					votesAvg: Math.pow(Math.E, votesAvg),
-					postRate: Math.log(postRate),
-				}))
-				.map((user) => [user.contributor, user]),
-		)
-
-		const mostProloficPosters = Object.values(users)
-			.sort((a, b) => b.postRate - a.postRate)
-			.slice(0, Math.floor(Math.log(usersData.length)))
 
 		const postsQuery = db
 			.selectFrom('follow')
@@ -183,23 +163,40 @@ export const handler = async (ctx: AppContext, params: QueryParams) => {
 			.orderBy('post.isoTime', 'desc')
 			.limit((params.limit ?? 30) * 4)
 
-		//console.log(postsQuery.compile().sql)
-		const postsData = await postsQuery.execute()
+		const [usersData, postsData] = await Promise.all([
+			usersQuery.execute(),
+			postsQuery.execute(),
+		])
+
+		const users = usersData.map(({ votesAvg, postRate, ...user }) => ({
+			...user,
+			votesAvg: Math.pow(Math.E, votesAvg),
+			postRate: Math.log(postRate),
+		}))
+
+		const mostProloficPosters = users
+			.sort((a, b) => b.postRate - a.postRate)
+			.slice(0, Math.floor(Math.log(usersData.length)))
 
 		const postLimit = mostProloficPosters.at(-1)?.postRate ?? 1
+
+		const usersWithThreshold = users.map((user) => ({
+			...user,
+			votesThreshold: (user.postRate - postLimit) * user.votesAvg,
+		}))
+
+		const usersLookup = Object.fromEntries(
+			usersWithThreshold.map((user) => [user.contributor, user]),
+		)
 
 		const posts = postsData
 			.map((post) => ({
 				...post,
-				...users[post.author],
+				...usersLookup[post.author],
 			}))
 			.map((post) => ({
 				...post,
-				normalizedVotes: post.votes / post.votesAvg,
-			}))
-			.map((post) => ({
-				...post,
-				isBanger: post.postRate - postLimit < post.normalizedVotes,
+				isBanger: post.votes > post.votesThreshold,
 			}))
 
 		const feedWithMeta = posts.map((post) => ({
@@ -220,23 +217,22 @@ export const handler = async (ctx: AppContext, params: QueryParams) => {
 		const cursor = (limitedFeed ?? []).at(-1)?.isoTime ?? undefined
 
 		const feed = limitedFeed.map(
-			({ post, reason, isoTime, votes, postRate, normalizedVotes }) => ({
+			({ post, reason, isoTime, votes, postRate, votesThreshold }) => ({
 				post,
 				reason,
 				isoTime,
 				votes,
 				postRate,
-				normalizedVotes,
+				votesThreshold,
 			}),
 		)
 
 		const end = new Date()
 
-		//console.log('took', differenceInMilliseconds(end, start), 'ms')
-
 		return {
 			feed,
 			cursor,
+			took: differenceInMilliseconds(end, start) + 'ms',
 		}
 	} catch (e) {
 		console.error(e)
