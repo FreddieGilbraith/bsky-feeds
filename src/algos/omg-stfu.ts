@@ -3,7 +3,7 @@ import 'isomorphic-fetch'
 import xrpc from '@atproto/xrpc'
 import { sql } from 'kysely'
 
-import { differenceInMilliseconds } from 'date-fns'
+import { differenceInMilliseconds, sub } from 'date-fns'
 import { QueryParams } from '../lexicon/types/app/bsky/feed/getFeedSkeleton'
 import { AppContext } from '../config'
 import { schemas } from '../lexicon/lexicons'
@@ -95,6 +95,15 @@ async function refreshLocalForUser(ctx: AppContext, params: QueryParams) {
 	}
 }
 
+async function cleanupOld(ctx: AppContext) {
+	const { db } = ctx
+
+	await db
+		.deleteFrom('post')
+		.where('isoTime', '>', sub(new Date(), { days: 5 }).toISOString())
+		.execute()
+}
+
 async function time<T>(label: string, fn: () => Promise<T>): Promise<T> {
 	const start = new Date()
 	const out = await fn()
@@ -104,71 +113,77 @@ async function time<T>(label: string, fn: () => Promise<T>): Promise<T> {
 }
 
 export const handler = async (ctx: AppContext, params: QueryParams) => {
-	const { db } = ctx
-	refreshLocalForUser(ctx, params).catch(
-		console.error.bind(null, 'refreshLocalForUser'),
-	)
-
-	const start = new Date()
-
-	const [{ usersCount, postsCount }] = await db
-		.selectFrom('post')
-		.select((eb) => [
-			eb.fn.count<number>('postUri').as('postsCount'),
-			eb.fn.count<number>('author').distinct().as('usersCount'),
-		])
-		.execute()
-
-	const userPostsAvg = postsCount / usersCount
-
-	//console.log({ userPostsAvg, postsCount, usersCount })
-
-	const usersQuery = db
-		.selectFrom('follow')
-		.where('follower', '=', params.requesterDid)
-		.innerJoin('post', 'follow.followed', 'post.contributor')
-		.groupBy('post.contributor')
-		.select(({ eb }) => [
-			'followed as contributor',
-			eb.fn.count<number>('post.postUri').as('postsByUser'),
-			eb.fn.avg<number>(sql`ln(post.votes)`).as('votesAvg'),
-			eb(eb.fn.count<number>('post.postUri'), '/', userPostsAvg).as('postRate'),
-		])
-	//console.log(usersQuery.compile().sql)
-	const usersData = await usersQuery.execute()
-
-	const users = Object.fromEntries(
-		usersData
-			.map(({ votesAvg, postRate, ...user }) => ({
-				...user,
-				votesAvg: Math.pow(Math.E, votesAvg),
-				postRate: Math.log(postRate),
-			}))
-			.map((user) => [user.contributor, user]),
-	)
-
-	const mostProloficPosters = Object.values(users)
-		.sort((a, b) => b.postRate - a.postRate)
-		.slice(0, Math.floor(Math.log(usersData.length)))
-
-	const postsQuery = db
-		.selectFrom('follow')
-		.where('follower', '=', params.requesterDid)
-		.innerJoin('post', 'follow.followed', 'post.contributor')
-		.select([
-			'followed as contributor',
-			'post.author as author',
-			'post.uri as uri',
-			'post.postUri as post',
-			'post.isoTime',
-			'post.votes',
-		])
-		.where('post.isoTime', '<', params.cursor ?? start.toISOString())
-		.orderBy('post.isoTime', 'desc')
-		.limit((params.limit ?? 30) * 4)
-
-	//console.log(postsQuery.compile().sql)
 	try {
+		const { db } = ctx
+
+		cleanupOld(ctx).catch(console.error.bind(null, 'cleanupOld'))
+		refreshLocalForUser(ctx, params).catch(
+			console.error.bind(null, 'refreshLocalForUser'),
+		)
+
+		const start = new Date()
+
+		const [{ usersCount, postsCount }] = await db
+			.selectFrom('post')
+			.select((eb) => [
+				eb.fn.count<number>('postUri').as('postsCount'),
+				eb.fn.count<number>('author').distinct().as('usersCount'),
+			])
+			.execute()
+
+		const userPostsAvg = postsCount / usersCount
+
+		//console.log({ userPostsAvg, postsCount, usersCount })
+
+		const usersQuery = db
+			.selectFrom('follow')
+			.where('follower', '=', params.requesterDid)
+			.innerJoin('post', 'follow.followed', 'post.contributor')
+			.groupBy('post.contributor')
+			.select(({ eb }) => [
+				'followed as contributor',
+				eb.fn.count<number>('post.postUri').as('postsByUser'),
+				eb.fn.avg<number>(sql`ln(post.votes)`).as('votesAvg'),
+				eb(eb.fn.count<number>('post.postUri'), '/', userPostsAvg).as(
+					'postRate',
+				),
+			])
+
+		//console.log(usersQuery.compile().sql)
+
+		const usersData = await usersQuery.execute()
+
+		const users = Object.fromEntries(
+			usersData
+				.map(({ votesAvg, postRate, ...user }) => ({
+					...user,
+					votesAvg: Math.pow(Math.E, votesAvg),
+					postRate: Math.log(postRate),
+				}))
+				.map((user) => [user.contributor, user]),
+		)
+
+		const mostProloficPosters = Object.values(users)
+			.sort((a, b) => b.postRate - a.postRate)
+			.slice(0, Math.floor(Math.log(usersData.length)))
+
+		const postsQuery = db
+			.selectFrom('follow')
+			.where('follower', '=', params.requesterDid)
+			.innerJoin('post', 'follow.followed', 'post.contributor')
+			.select([
+				'followed as contributor',
+				'post.author as author',
+				'post.uri as uri',
+				'post.postUri as post',
+				'post.isoTime',
+				'post.votes',
+			])
+			.where('post.isoTime', '<', params.cursor ?? start.toISOString())
+			.orderBy('post.isoTime', 'desc')
+			.limit((params.limit ?? 30) * 4)
+
+		//console.log(postsQuery.compile().sql)
 		const postsData = await postsQuery.execute()
 
 		const postLimit = mostProloficPosters.at(-1)?.postRate ?? 1
