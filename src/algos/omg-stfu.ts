@@ -100,7 +100,7 @@ async function cleanupOld(ctx: AppContext) {
 
 	await db
 		.deleteFrom('post')
-		.where('isoTime', '>', sub(new Date(), { days: 5 }).toISOString())
+		.where('isoTime', '<', sub(new Date(), { days: 5 }).toISOString())
 		.execute()
 }
 
