@@ -64,15 +64,18 @@ async function createRepost(db: Database, op: CreateOp<RepostRecord>) {
 		.where('uri', '=', op.author)
 		.execute()
 
-	if (findRecorder.length > 0) {
+	const contributor = op.author
+	const author = op.record.subject.uri.replace('at://', '').split('/')[0]
+
+	if (findRecorder.length > 0 && contributor !== author) {
 		await db
 			.insertInto('post')
 			.values({
 				uri: op.uri,
-				contributor: op.author,
+				contributor,
 
 				postUri: op.record.subject.uri,
-				author: op.record.subject.uri.replace('at://', '').split('/')[0],
+				author,
 
 				isoTime: new Date().toISOString(),
 				votes: 0,
