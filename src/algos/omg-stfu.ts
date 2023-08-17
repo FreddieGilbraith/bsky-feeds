@@ -53,6 +53,8 @@ async function refreshLocalForUser(ctx: AppContext, params: QueryParams) {
 				.execute(),
 		])
 
+		actualFollows.push(follower)
+
 		const followsToRemove = new Set(storedFollows.map((x) => x.followed))
 		for (const actualFollow of actualFollows) {
 			followsToRemove.delete(actualFollow)
