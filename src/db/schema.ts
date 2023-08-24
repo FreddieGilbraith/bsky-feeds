@@ -2,6 +2,7 @@ export type DatabaseSchema = {
 	post: Post
 	user: User
 	follow: Follow
+	app: AppState
 }
 
 export type Post = {
@@ -23,4 +24,9 @@ export type User = {
 export type Follow = {
 	followed: string
 	follower: string
+}
+
+export type AppState = {
+	service: string
+	cursor: number
 }

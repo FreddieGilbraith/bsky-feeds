@@ -20,7 +20,7 @@ export abstract class FirehoseSubscriptionBase {
 		this.sub = new Subscription({
 			service: service,
 			method: ids.ComAtprotoSyncSubscribeRepos,
-			getParams: () => null, // this.getCursor(),
+			getParams: () => this.getCursor(),
 			validate: (value: unknown) => {
 				try {
 					return lexicons.assertValidXrpcMessage<RepoEvent>(
@@ -47,7 +47,7 @@ export abstract class FirehoseSubscriptionBase {
 				}
 				// update stored cursor every 20 events or so
 				if (isCommit(evt) && evt.seq % 20 === 0) {
-					//await this.updateCursor(evt.seq)
+					await this.updateCursor(evt.seq)
 				}
 			}
 		} catch (err) {
@@ -59,22 +59,23 @@ export abstract class FirehoseSubscriptionBase {
 		}
 	}
 
-	//async updateCursor(cursor: number) {
-	//await this.db
-	//.updateTable('sub_state')
-	//.set({ cursor })
-	//.where('service', '=', this.service)
-	//.execute()
-	//}
+	async updateCursor(cursor: number) {
+		await this.db
+			.updateTable('app')
+			.set({ cursor })
+			.where('service', '=', this.service)
+			.execute()
+	}
 
-	//async getCursor(): Promise<{ cursor?: number }> {
-	//const res = await this.db
-	//.selectFrom('sub_state')
-	//.selectAll()
-	//.where('service', '=', this.service)
-	//.executeTakeFirst()
-	//return res ? { cursor: res.cursor } : {}
-	//}
+	async getCursor(): Promise<{ cursor?: number }> {
+		const res = await this.db
+			.selectFrom('app')
+			.selectAll()
+			.where('service', '=', this.service)
+			.executeTakeFirst()
+
+		return res ? { cursor: res.cursor } : {}
+	}
 }
 
 export const getOpsByType = async (evt: Commit): Promise<OperationsByType> => {

@@ -88,8 +88,15 @@ async function deleteRepost(db: Database, op: DeleteOp) {
 	await db.deleteFrom('post').where('uri', '=', op.uri).execute()
 }
 
+let i = 0
+
 export class FirehoseSubscription extends FirehoseSubscriptionBase {
 	async handleEvent(evt: RepoEvent) {
+		if (i++ > 10000) {
+			console.log('ping', new Date().toISOString())
+			i = 0
+		}
+
 		if (!isCommit(evt)) return
 
 		const ops = await getOpsByType(evt)

@@ -76,3 +76,23 @@ migrations['002'] = {
 			.execute()
 	},
 }
+
+migrations['003'] = {
+	async up(db: Kysely<unknown>) {},
+
+	async down(db: Kysely<unknown>) {},
+}
+
+migrations['004'] = {
+	async up(db: Kysely<unknown>) {
+		await db.schema
+			.createTable('app')
+			.addColumn('service', 'varchar', (col) => col.primaryKey())
+			.addColumn('cursor', 'integer', (col) => col.notNull())
+			.execute()
+	},
+
+	async down(db: Kysely<unknown>) {
+		await db.schema.dropTable('app').execute()
+	},
+}
